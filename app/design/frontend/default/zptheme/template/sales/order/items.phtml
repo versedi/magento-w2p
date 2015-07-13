@@ -20,13 +20,14 @@
  *
  * @category    design
  * @package     base_default
-  * @copyright   Copyright (c) 2014 Magento Inc. (http://www.magentocommerce.com)
+ * @copyright   Copyright (c) 2009 Irubin Consulting Inc. DBA Varien (http://www.varien.com)
  * @license     http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
  */
 ?>
 <?php  $_order = $this->getOrder() ?>
 
-<!-- /****** ZP-CODE:1 Insert link to hide/show all previews *****/ -->
+<!-- /****** ZP-CODE:1  Inserting link to hide/show all previews
+             one time *****/ -->
 
 <?php echo $this->helper('webtoprint/personalization-form')
               ->show_hide_all_order_previews($this); ?>
@@ -64,16 +65,16 @@
                 <td class="gift-message-row" colspan="7">
                     <a href="#" title="<?php echo $this->__('Close') ?>" onclick="return giftMessageToogle('<?php echo $_item->getId() ?>');" class="btn-close"><?php echo $this->__('Close') ?></a>
                     <dl class="gift-message">
-                        <dt><strong><?php echo $this->__('From:') ?></strong> <?php echo $this->escapeHtml($_giftMessage->getRecipient()) ?></dt>
-                        <dt><strong><?php echo $this->__('To:') ?></strong> <?php echo $this->escapeHtml($_giftMessage->getSender()) ?></dt>
+                        <dt><strong><?php echo $this->__('From:') ?></strong> <?php echo $this->htmlEscape($_giftMessage->getRecipient()) ?></dt>
+                        <dt><strong><?php echo $this->__('To:') ?></strong> <?php echo $this->htmlEscape($_giftMessage->getSender()) ?></dt>
                         <dd><?php echo $this->helper('giftmessage/message')->getEscapedGiftMessage($_item) ?></dd>
                     </dl>
                 </td>
             </tr>
             <?php endif ?>
 
-            <!-- /****** ZP-CODE:2 Insert preview images from the order
-                                   for web-to-print products *****/ -->
+            <!-- /****** ZP-CODE:2  Inserting preview images for web-to-print products
+                         from order *****/ -->
 
             <?php $this->helper('webtoprint/personalization-form')->get_order_preview_images($this, $_item); ?>
 
@@ -84,7 +85,7 @@
 </table>
 <script type="text/javascript">decorateTable('my-orders-table', {'tbody' : ['odd', 'even'], 'tbody tr' : ['first', 'last']})</script>
 
-<!-- /****** ZP-CODE:3 Inserting javascript code for previews images *****/ -->
+<!-- /****** ZP-CODE:3  Inserting javascript code for previews images *****/ -->
 
 <?php $this->helper('webtoprint/personalization-form')->get_js_for_order_preview_images($this); ?>
 

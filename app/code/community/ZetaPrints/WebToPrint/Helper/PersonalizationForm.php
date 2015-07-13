@@ -4,21 +4,113 @@ class ZetaPrints_WebToPrint_Helper_PersonalizationForm
   extends ZetaPrints_WebToPrint_Helper_Data
   implements ZetaPrints_Api {
 
+  private function get_template_guid_from_product ($product) {
+
+    //Get template GUID from webtoprint_template attribute if such attribute exists
+    //and contains value, otherwise use product SKU as template GUID
+    if (!($product->hasWebtoprintTemplate() && $template_guid = $product->getWebtoprintTemplate()))
+      $template_guid = $product->getSku();
+
+    if (strlen($template_guid) != 36)
+      return false;
+
+    return $template_guid;
+  }
+
+  public function get_template_id ($product) {
+    if ($template_guid = $this->get_template_guid_from_product ($product))
+      return Mage::getModel('webtoprint/template')->getResource()->getIdByGuid($template_guid);
+  }
+
   private function get_form_part_html ($form_part = null, $product, $params = array()) {
+    $template_guid = $this->get_template_guid_from_product($product);
+
+    if (!$template_guid)
+      return false;
+
     //$template = Mage::getModel('webtoprint/template')->load($template_guid);
 
     //if (!$template->getId())
     //  return false;
 
-    if (! $xml = $this->getTemplateXmlForCurrentProduct())
-      return;
+    if (! $xml = Mage::registry('webtoprint-template-xml')) {
+      //This flag shows a status of web-to-print user registration
+      $user_was_registered = true;
 
-    //if ($form_part === 'text-fields' || $form_part === 'image-fields')
+      //Check a status of web-to-print user registration on ZetaPrints
+      //and if it's not then set user_was_registered flag to false
+      if (!($user_credentials = $this->get_zetaprints_credentials())) {
+        $template = Mage::getModel('webtoprint/template')->load($template_guid);
+
+        if ($template->getId())
+          $user_was_registered = false;
+      }
+
+      //Remember a status of web-to-print user registrarion for subsequent
+      //function calls
+      Mage::register('webtoprint-user-was-registered', $user_was_registered);
+
+      if ($user_was_registered) {
+        $url = Mage::getStoreConfig('webtoprint/settings/url');
+        $key = Mage::getStoreConfig('webtoprint/settings/key');
+
+        $data = array(
+          'ID' => $user_credentials['id'],
+          'Hash' => zetaprints_generate_user_password_hash(
+                                              $user_credentials['password']) );
+
+        if ($product->getConfigureMode()
+            && $orderId = Mage::registry('webtoprint-order-id'))
+          $data['OrderID'] = $orderId;
+
+        $template_xml = zetaprints_get_template_details_as_xml($url, $key,
+                                                        $template_guid, $data);
+      } else
+        $template_xml = $template->getXml();
+
+      try {
+        $xml = new SimpleXMLElement($template_xml);
+      } catch (Exception $e) {
+        Mage::log("Exception: {$e->getMessage()}");
+
+        return false;
+      }
+
+      //If product page was requested with reorder parameter...
+      if ($this->_getRequest()->has('reorder')
+          && strlen($this->_getRequest()->getParam('reorder')) == 36)
+        //...then replace field values from order details
+        $this->replace_user_input_from_order_details($xml,
+                                    $this->_getRequest()->getParam('reorder'));
+
+      //If product page was requested with for-item parameter...
+      if ($this->_getRequest()->has('for-item'))
+        //...then replace various template values from item's options
+        $this->replace_template_values_from_cart_item($xml,
+                                    $this->_getRequest()->getParam('for-item'));
+
+      Mage::register('webtoprint-template-xml', $xml);
+    }
+
+    //if ($form_part === 'input-fields' || $form_part === 'stock-images')
     //  $this->add_values_from_cache($xml);
 
-    if ($form_part === 'image-fields'
+    if ($form_part === 'stock-images'
         && Mage::registry('webtoprint-user-was-registered'))
       $this->add_user_images($xml);
+
+    if ($form_part === 'page-tabs') {
+      $this->update_preview_images_urls($xml);
+
+      $session = Mage::getSingleton('core/session');
+
+      if ($session->hasData('zetaprints-previews')) {
+        $previews = unserialize($session->getData('zetaprints-previews'));
+
+        if (is_array($previews))
+          $this->replace_preview_images($xml, $previews);
+      }
+    }
 
     if ($form_part === 'page-size-table'
         && !isset($xml->Pages->Page[0]['WidthIn']))
@@ -105,34 +197,45 @@ class ZetaPrints_WebToPrint_Helper_PersonalizationForm
       }
   }
 
-  /**
-   * @deprecated after 2.3.0.0
-   * @see ZetaPrints_WebToPrint_Helper_2step::isPersonalisationStep()
-   */
   public function is_personalization_step ($context) {
-    return Mage::registry('webtoprint_is_personalisation_step');
+    return $context->getRequest()->has('personalization') && $context->getRequest()->getParam('personalization') == '1';
   }
 
-  /**
-   * @deprecated after 2.3.0.0
-   * @see ZetaPrints_WebToPrint_Model_Events_Observer::setUrlForNextStep()
-   */
   public function get_next_step_url ($context) {
-    $product = $context->getProduct();
+    if (!$this->is_personalization_step($context)) {
+      //Add personalization parameter to URL
+      $params = array('personalization' => '1');
 
-    if (!Mage::registry('webtoprint_is_personalisation_step'))
-      $context->setData(
-        'submit_route_data',
-        Mage::helper('webtoprint/2step')->getNextStepRoute($product)
-      );
+      //Check if the product page was requested with reorder parameter
+      //then proxy the parameter to personalization step
+      if ($this->_getRequest()->has('reorder'))
+        $params['reorder'] = $this->_getRequest()->getParam('reorder');
 
-    echo $context->getSubmitUrl($product);
+      //Check if the product page was requested with for-item parameter
+      //then proxy the parameter to personalization step and ignore last
+      //visited page (need it to distinguish cross-sell product and already
+      //personalized product)
+      if ($this->_getRequest()->has('for-item'))
+        $params['for-item'] = $this->_getRequest()->getParam('for-item');
+      else
+        //Check that the product page was opened from cart page (need for
+        //automatic first preview update for cross-sell product)
+        if (strpos(Mage::getSingleton('core/session')->getData('last_url'),
+              'checkout/cart') !== false)
+          //Send update-first-preview query parameter to personalization step
+          $params['update-first-preview'] = 1;
 
-    return true;
+      //Print out url for the product
+      echo $this->create_url_for_product($context->getProduct(), $params);
+
+      return true;
+    }
+    else
+      return false;
   }
 
   public function get_params_from_previous_step ($context) {
-    if (!Mage::registry('webtoprint_is_personalisation_step'))
+    if (!$this->is_personalization_step($context))
       return;
 
     foreach ($_POST as $key => $value) {
@@ -148,11 +251,10 @@ class ZetaPrints_WebToPrint_Helper_PersonalizationForm
     return false;
   }
 
-  public function get_cart_image ($context, $width = 0, $height = 0) {
+  public function get_cart_image ($context) {
     $options = unserialize($context->getItem()->getOptionByCode('info_buyRequest')->getValue());
 
-    if (!isset($options['zetaprints-previews'])
-         || !$options['zetaprints-previews'])
+    if (!isset($options['zetaprints-previews']))
       return false;
 
     $images = explode(',', $options['zetaprints-previews']);
@@ -176,11 +278,7 @@ class ZetaPrints_WebToPrint_Helper_PersonalizationForm
       } else
         echo "<a class=\"in-dialog product-image\" href=\"$href\" rel=\"{$group}\" style=\"display: none\">";
 
-      $style = $width
-                 ? 'style="max-width: ' . $width . 'px;"'
-                   : 'style="max-width: 75px;"';
-
-      echo '<img src="', $src, '" ', $style, ' />';
+      echo "<img src=\"$src\" style=\"max-width: 75px;\" />";
       echo "</a>";
     }
 
@@ -226,14 +324,13 @@ jQuery(document).ready(function($) {
   }
 
   public function get_preview_image_sharing_link ($context = null) {
-    $url = Mage::getModel('catalog/product_media_config')
-             ->getTmpMediaUrl('previews/');
+    $media_url = Mage::getModel('catalog/product_media_config')
+                    ->getTmpMediaUrl('previews/');
 
-    if(substr($url, 0, 1) == '/') {
-      $url = $this->_getRequest()->getScheme()
-             . '://'
-             . $_SERVER['SERVER_NAME']
-             . $url;
+    if(substr($media_url, 0, 1) == '/') {
+      $scheme = $this->_getRequest()->getScheme()
+              == Zend_Controller_Request_Http::SCHEME_HTTPS ? 'https' : 'http';
+      $media_url = $scheme . '://' . $_SERVER['SERVER_NAME'] . $media_url;
     }
  ?>
 
@@ -245,7 +342,7 @@ jQuery(document).ready(function($) {
 <script type="text/javascript">
 //<![CDATA[
   var place_preview_image_sharing_link = true;
-  var preview_image_sharing_link_template = '<?php echo $url; ?>';
+  var preview_image_sharing_link_template = '<?php echo $media_url; ?>';
 
   jQuery(document).ready(function($) {
     $('#zetaprints-share-link-input').focusout(function() {
@@ -253,15 +350,11 @@ jQuery(document).ready(function($) {
     }).click(function () {
       $(this).select();
     }).select(function () {
-      var guid = zp
-                   .template_details
-                   .pages[zp.current_page]['updated-preview-image'];
-
       $.ajax({
         url: zp.url.preview_download,
         type: 'POST',
         dataType: 'json',
-        data: 'guid=' + guid,
+        data: 'guid=' + zp.previews[zp.current_page - 1],
         error: function (XMLHttpRequest, textStatus, errorThrown) {
           alert(preview_sharing_link_error_text + ': ' + textStatus);
         },
@@ -288,37 +381,19 @@ jQuery(document).ready(function($) {
 <?php
   }
 
-  /**
-   * @deprecated after 2.3.0.0
-   * @see ZetaPrints_WebToPrint_Model_Events_Observer::getImageType()
-   * @see ZetaPrints_WebToPrint_Model_Events_Observer::getImageLabel()
-   */
   public function get_preview_image ($context) {
-    $product = $context->getProduct();
-
-    if (!$product->getSmallImage())
+    if (!$context->getProduct()->getSmallImage())
       return false;
 
-    $url = $context->helper('catalog/image')
-      ->init($product, 'small_image')
-      ->resize(265);
+    $img = '<img src="' . $context->helper('catalog/image')->init($context->getProduct(), 'small_image')->resize(265) . '" alt="'.$context->htmlEscape($context->getProduct()->getSmallImageLabel()).'" />';
 
-    $label = $this->escapeHtml($context->getImageLabel(null, 'small_image'));
-
-    echo $context->helper('catalog/output')->productAttribute(
-      $product,
-      '<img id="image" src="' . $url
-        . '" alt="' . $label
-        . '" title="' . $label
-        . '" />',
-      'small_image'
-    );
+    echo $context->helper('catalog/output')->productAttribute($context->getProduct(), $img, 'small_image');
 
     return true;
   }
 
   public function get_text_fields ($context) {
-    $html = $this->get_form_part_html('text-fields', $context->getProduct());
+    $html = $this->get_form_part_html('input-fields', $context->getProduct());
 
     if ($html === false)
       return false;
@@ -328,13 +403,11 @@ jQuery(document).ready(function($) {
   }
 
   public function get_image_fields ($context) {
-    $design = Mage::getDesign();
-
     $params = array(
       'ajax-loader-image-url'
-        => $design->getSkinUrl('webtoprint/images/spinner.gif'),
+        => Mage::getDesign()->getSkinUrl('images/spinner.gif'),
       'user-image-edit-button'
-        => $design->getSkinUrl('webtoprint/images/image-edit/edit.png'),
+        => Mage::getDesign()->getSkinUrl('images/image-edit/edit.png'),
       'photothumbnail-url-height-100-template'
         => $this->get_photo_thumbnail_url('image-guid.image-ext', 0, 100),
       'photothumbnail-url-template'
@@ -343,7 +416,7 @@ jQuery(document).ready(function($) {
         => (bool) $this->getCustomOptions('fields/image@show-on-load=1')
     );
 
-    $html = $this->get_form_part_html('image-fields', $context->getProduct(), $params);
+    $html = $this->get_form_part_html('stock-images', $context->getProduct(), $params);
 
     if ($html === false)
       return false;
@@ -388,31 +461,77 @@ jQuery(document).ready(function($) {
         }
   }
 
+  private function replace_user_input_from_order_details($template, $order_guid) {
+    $url = Mage::getStoreConfig('webtoprint/settings/url');
+    $key = Mage::getStoreConfig('webtoprint/settings/key');
+
+    $order_details = zetaprints_get_order_details($url, $key, $order_guid);
+
+    if (!$order_details)
+      return;
+
+    //Replace text field values from order details
+    foreach ($template->Fields->Field as $field)
+      foreach ($order_details['template-details']['pages'] as $page)
+        if ($value = $page['fields'][(string) $field['FieldName']]['value']) {
+          $field['Value'] = $value;
+          break;
+        }
+
+    //Replace image field values from order details
+    foreach ($template->Images->Image as $image)
+      foreach ($order_details['template-details']['pages'] as $page)
+        if ($value = $page['images'][(string) $image['Name']]['value']) {
+          $image['Value'] = $value;
+          break;
+        }
+  }
+
   public function get_page_tabs ($context) {
-    $html = $this->get_form_part_html('page-tabs', $context->getProduct());
+    $params = array(
+      'thumbnail-url-template'
+        => $this->get_thumbnail_url('image-guid.image-ext', 100, 100) );
+
+    $html = $this->get_form_part_html('page-tabs', $context->getProduct(), $params);
 
     if ($html === false)
       return false;
 
     echo $html;
-
     return true;
   }
 
   public function get_preview_button ($context) {
-    echo $context->getChildHtml('webtoprint_buttons');
+    if (!$this->get_template_id($context->getProduct()))
+      return false;
+?>
+    <div class="zetaprints-preview-button">
+      <button class="update-preview button">
+        <span><span><?php echo $this->__('Update preview');?></span></span>
+      </button>
+      <img src="<?php echo Mage::getDesign()->getSkinUrl('images/spinner.gif'); ?>" class="ajax-loader" alt="" />
+      <span class="text"><?php echo $this->__('Updating preview image');?>&hellip;</span>
+    </div>
+<?php
   }
 
   public function get_next_page_button ($context) {
-    return false;
+    if (!$this->get_template_id($context->getProduct()))
+      return false;
+?>
+    <div class="zetaprints-next-page-button">
+      <button class="next-page button">
+        <span><span><?php echo $this->__('Next page');?></span></span>
+      </button>
+    </div>
+<?php
   }
 
   public function prepare_gallery_images ($context, $check_for_personalization = false) {
     if (!$this->get_template_id($context->getProduct()))
       return false;
 
-    if ($check_for_personalization
-        && !Mage::registry('webtoprint_is_personalisation_step'))
+    if ($check_for_personalization && !$this->is_personalization_step($context))
       return false;
 
     $images = $context->getProduct()->getMediaGalleryImages();
@@ -457,15 +576,10 @@ jQuery(document).ready(function($) {
   }
 
   public function get_order_webtoprint_links ($context, $item = null) {
-    $isAdmin = false;
-
-    if (!$item) {
-      $item = $context->getItem();
-
-      $isAdmin = true;
-    }
-
-    $options = $item->getProductOptionByCode('info_buyRequest');
+    if ($item)
+      $options = $item->getProductOptionByCode('info_buyRequest');
+    else
+      $options = $context->getItem()->getProductOptionByCode('info_buyRequest');
 
     //Check for ZetaPrints Template ID in item options
     //If it doesn't exist or product doesn't have web-to-print features then...
@@ -473,193 +587,13 @@ jQuery(document).ready(function($) {
       //... just return from the function.
       return;
 
-    $isOrderComplete = isset($options['zetaprints-order-completed'])
-                       && $options['zetaprints-order-completed'];
-
-    if ($isAdmin && !$isOrderComplete) {
-      $url = Mage::helper('adminhtml')
-               ->getUrl('web-to-print-admin/order/complete',
-                        array('item' => $item->getId()));
-
-      $title = $this->__('Complete order on ZetaPrints');
-
-      echo '<br />'
-           . "<a id=\"zp-complete-order-link\" href=\"{$url}\">{$title}</a>";
-    }
-
-    if ($isAdmin && isset($options['zetaprints-previews'])
-        && !$options['zetaprints-previews']) {
-
-      $input = array();
-
-      foreach ($options as $key => $value) {
-        //Ignore key if it doesn't start with 'zetaprints-' prefix
-        if (strpos($key, 'zetaprints-') !== 0)
-          continue;
-
-        //Remove prefix from the key
-        $_key = substr($key, 11);
-
-        if (!(strpos($_key, '_') === 0 || strpos($_key, '#') === 0
-            || strpos($_key, '*') === 0))
-          continue;
-
-        if (strpos($_key, '#') === 0) {
-          if (! $details = $context->getTemplateDetails()) {
-            $details = $this
-                  ->getTemplateDetailsByGUID($options['zetaprints-TemplateID']);
-
-            if ($details)
-              $context->setTemplateDetails($details);
-          }
-
-          if ($details) {
-            if (! $stockImages = $context->getStockImages()) {
-              $stockImages = array();
-
-              foreach ($details['pages'] as $page)
-                foreach ($page['images'] as $imageField)
-                  if (isset($imageField['stock-images']))
-                    foreach ($imageField['stock-images'] as $image)
-                      if (!isset($stockImages[$image['guid']])) {
-                        $tokens = explode('.', $image['thumb']);
-
-                        $stockImages[$image['guid']]
-                          = array('thumb' => $image['thumb'],
-                                  'small-thumb'
-                                       => $tokens[0] . '_0x100.' . $tokens[1] );
-                      }
-
-              $context->setStockImages($stockImages);
-            }
-
-            if (isset($stockImages[$value])) {
-              $url = Mage::getStoreConfig('webtoprint/settings/url')
-                     . 'photothumbs/'
-                     . $stockImages[$value]['thumb'];
-
-              $small_url = Mage::getStoreConfig('webtoprint/settings/url')
-                           . 'photothumbs/'
-                           . $stockImages[$value]['small-thumb'];
-
-              $value = "<a href=\"{$url}\" target=\"_blank\">" .
-                         "<image src=\"{$small_url}\" />" .
-                       "</a>";
-            } else {
-              if (! $userImages = $context->getUserImages()) {
-                $customer = Mage::getModel('customer/customer')
-                              ->load($item->getOrder()->getCustomerId());
-
-                $userImages = array();
-
-                if ($customer->getId()) {
-                  $url = Mage::getStoreConfig('webtoprint/settings/url');
-                  $key = Mage::getStoreConfig('webtoprint/settings/key');
-
-                  $data = array(
-                    'ID' => $customer->getZetaprintsUser(),
-                    'Hash' => zetaprints_generate_user_password_hash(
-                                          $customer->getZetaprintsPassword()) );
-
-                  $userImages = zetaprints_get_user_images($url, $key, $data);
-
-                  $context->setUserImages($userImages);
-                }
-              }
-
-              if (isset($userImages[$value])) {
-                $url = Mage::getStoreConfig('webtoprint/settings/url')
-                     . 'photothumbs/' 
-                     . $userImages[$value]['thumbnail'];
-
-                $tokens = explode('.', $userImages[$value]['thumbnail']);
-
-                $small_url = Mage::getStoreConfig('webtoprint/settings/url')
-                             . 'photothumbs/' 
-                             . $tokens[0] . '_0x100.' . $tokens[1];
-
-                $value = "<a href=\"{$url}\" target=\"_blank\">" .
-                           "<image src=\"{$small_url}\" />" .
-                         "</a>";
-              }
-            }
-          }
-
-          if ($value === '#')
-            $value = $this->__('Default');
-
-          if ($value === '')
-            $value = $this->__('Blank');
-        } else
-          $value = "<pre>{$value}</pre>";
-
-        //Determine length of field prefix
-        $prefix_length = 0;
-        if (strpos($_key, '*') === 0)
-          $prefix_length = 1;
-
-        //Process field name (key), restore original symbols
-        $_key = substr($_key, 0, $prefix_length)
-                . str_replace( array('_', "\x0A"),
-                               array(' ', '.'),
-                               substr($_key, $prefix_length + 1) );
-
-        //Add token to the array
-        $input[$_key] = $value;
-      }
-
-      if (count($input)) {
-        $product = Mage::getModel('catalog/product')->load($options['product']);
-
-        if ($product->getId()) {
-          $productUrl = $product->getProductUrl();
-          $productName = $product->getName();
-        }
-?>
-        <div style="display: none;">
-          <div id ="zp-user-input-table">
-
-            <?php if (isset($productUrl)): ?>
-              <a href="<?php echo $productUrl; ?>">
-                <?php echo $productName; ?>
-              </a>
-            <?php endif; ?>
-
-            <table id ="zp-user-input-table">
-              <thead>
-                <tr>
-                  <th><?php echo $this->__('Name'); ?></th>
-                  <th><?php echo $this->__('Value'); ?></th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach ($input as $name => $value): ?>
-                <tr>
-                  <td><?php echo $name; ?></td>
-                  <td><?php echo $value; ?></td>
-                </tr>
-                <?php endforeach ?>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <br />
-
-        <a id ="zp-user-input-link" href="#zp-user-input-table">
-          <?php echo $this->__('Show customer\'s input data'); ?>
-        </a>
-<?php
-      }
-    }
-
     //Get value of custom option which allows users download files
     //regardless of ZP template setting
     $is_user_allowed_download = Mage::helper('webtoprint')
                               ->getCustomOptions('file-download/users@allow=1');
 
     //Check that downloading generated files is allowed for users
-    if (!$isAdmin && !$is_user_allowed_download) {
+    if ($item && !$is_user_allowed_download) {
       $template = Mage::getModel('webtoprint/template')
                                       ->load($options['zetaprints-TemplateID']);
 
@@ -683,12 +617,12 @@ jQuery(document).ready(function($) {
         return;
     }
 
-    $webtoprint_links = '<br />';
+    $webtoprint_links = "";
 
     $types = array('pdf', 'gif', 'png', 'jpeg');
 
     //If function called from admin template
-    if ($isAdmin)
+    if (!$item)
       //then add CDR file type to list of available types
       array_push($types, 'cdr');
 
@@ -700,7 +634,7 @@ jQuery(document).ready(function($) {
 
     //Check if the item is not null (it means the function was called from admin
     //interface) and ZetaPrints Order ID option is in the item then...
-    if ($isAdmin && isset($options['zetaprints-order-id'])) {
+    if (!$item && isset($options['zetaprints-order-id'])) {
       //... create URL to order details on web-to-print site
       $zp_order_url = Mage::getStoreConfig('webtoprint/settings/url')
                       . '?page=order-details;OrderID='
@@ -765,40 +699,6 @@ jQuery(document).ready(function($) {
             </ul>
           </div>
         </div>
-      </td>
-    </tr>
-<?php
-  }
-
-  public function getOrderPreviewImagesForEmail ($context, $item) {
-    $options = $item->getProductOptionByCode('info_buyRequest');
-
-    if (!(isset($options['zetaprints-previews'])
-          || isset($options['zetaprints-downloaded-previews'])))
-      return;
-
-    $dynamicImaging = isset($options['zetaprints-dynamic-imaging'])
-                        ? $options['zetaprints-dynamic-imaging'] : false;
-
-    $previews = $dynamicImaging ? $options['zetaprints-downloaded-previews']
-                                : explode(',', $options['zetaprints-previews']);
-?>
-    <tr>
-      <td colspan="4"
-          style=" border-bottom:2px solid #CCCCCC; padding:3px 9px;">
-      <?php foreach ($previews as $preview): ?>
-
-      <?php
-        $url = $dynamicImaging ? $preview : $this->get_preview_url($preview);
-        $thumb = $dynamicImaging ? $preview : $this->get_thumbnail_url($preview);
-      ?>
-        <a href="<?php echo $this->get_preview_url($preview); ?>"
-           style="text-decoration: none"
-           target="_blank">
-          <img src="<?php echo $this->get_thumbnail_url($preview); ?>"
-               title="<?php echo $this->__('Click to enlarge image');?>" />
-        </a>
-      <?php endforeach ?>
       </td>
     </tr>
 <?php
@@ -886,20 +786,6 @@ jQuery(document).ready(function($) {
     'speedIn': 500,
     'speedOut' : 500,
     'titleShow': false });
-
-  $('#zp-user-input-link').fancybox();
-
-  $('#zp-complete-order-link').click(function () {
-    $('<div class="zp-overlay">' +
-        '<div class="zp-overlay-spinner">' +
-          '<div />' +
-        '</div>' +
-        '<span class="zp-overlay-text">' +
-          '<?php echo $this->__('Completing order on ZetaPrints'); ?> &hellip;' +
-        '</span>' +
-      '</div>')
-      .appendTo('body');
-  });
 });
 //]]>
     </script>
@@ -936,10 +822,8 @@ jQuery(document).ready(function($) {
   public function getPageSizeTable ($context, $units = 'in') {
     $params = array(
       'page-size-units' => $units,
-      'page-size-icon' => Mage::getDesign()->getSkinUrl(
-        'webtoprint/images/page-size-icon.png'
-      )
-    );
+      'page-size-icon'
+                => Mage::getDesign()->getSkinUrl('images/page-size-icon.png') );
 
     $result = $this->get_form_part_html('page-size-table',
                                         $context->getProduct(),
@@ -948,12 +832,14 @@ jQuery(document).ready(function($) {
     echo $result ? $result : '';
   }
 
-  public function getDataSetTable ($context) {
-    if (! $templateId = $this->get_template_id($context->getProduct()))
+  public function get_js ($context) {
+    if (! $template_id = $this->get_template_id($context->getProduct()))
       return false;
 
+    $session = Mage::getSingleton('core/session');
+
     if (! $xml = Mage::registry('webtoprint-template-xml')) {
-      $template = Mage::getModel('webtoprint/template')->loadById($templateId);
+      $template = Mage::getModel('webtoprint/template')->loadById($template_id);
 
       if ($template->getId())
         try {
@@ -966,188 +852,78 @@ jQuery(document).ready(function($) {
     if (!$xml)
       return false;
 
-    $templateDetails = zetaprints_parse_template_details($xml);
+    $template_details = zetaprints_parse_template_details($xml);
 
-    $dataset = array();
-    $fieldNames = array();
+    $template_details['pages_number'] = count( $template_details['pages']);
 
-    foreach ($templateDetails['pages'] as $pageNumber => $page) {
-      if (!isset($page['fields']))
-        continue;
-
-      $_dataset = array();
-
-      foreach ($page['fields'] as $field)
-        if (isset($field['dataset'])) {
-          foreach ($field['dataset'] as $number => $data) {
-            if (! isset($_dataset[$number]))
-              $_dataset[$number] = array();
-
-            $_dataset[$number][] = $data;
-          }
-
-          $fieldNames[] = $field['name'];
-        }
-
-      if (count($_dataset))
-        $dataset[$pageNumber] = $_dataset;
-    }
-
-    if (!count($dataset))
-      return;
-?>
-  <div class="zp-dataset-wrapper">
-    <?php foreach ($dataset as $pageNumber => $_dataset): ?>
-    <div id="zp-dataset-page-<?php echo $pageNumber; ?>" class="zp-dataset">
-      <table id="zp-dataset-table-page-<?php echo $pageNumber; ?>" class="zp-dataset-table">
-        <thead>
-          <tr>
-            <th></th>
-
-            <?php
-              if (isset($templateDetails['pages'][$pageNumber]['fields'])):
-                $fields = $templateDetails['pages'][$pageNumber]['fields'];
-
-                foreach ($fields as $field):
-                  if (isset($field['dataset'])):
-            ?>
-
-            <th><?php echo $this->__($field['name']); ?></th>
-
-            <?php
-                  endif;
-                endforeach;
-              endif;
-            ?>
-
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($_dataset as $set): ?>
-          <tr>
-            <td class="zp-dataset-checkbox"><input type="checkbox" name="test" /></td>
-
-            <?php foreach ($set as $number => $data): ?>
-
-            <td class="<?php echo $fieldNames[$number]; ?>">
-              <?php foreach ($data['lines'] as $line => $text): ?>
-
-              <p <?php if (!$line): ?>class="zp-dataset-first-line"<?php endif ?>><?php echo $text; ?></p>
-
-              <?php endforeach ?>
-            </td>
-
-            <?php endforeach; ?>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-
-      <p class="zp-dataset-notice">
-        <?php echo $this->__('* Click on a cell to insert the value or click on the first column to insert the entire row.'); ?>
-      </p>
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <?php $title = $this->__('Database look-up'); ?>
-
-  <button id="zp-dataset-button" class="button hidden" title="<?php echo $title; ?>" type="button">
-    <span><span><?php echo $title; ?></span></span>
-  </button>
-
-<?php
-  }
-
-  /**
-   * @deprecated Replaced with camelCased version
-   */
-  public function get_js ($context) {
-    return $this->getJs($context);
-  }
-
-  public function getJs ($context) {
-    $product = $context->getProduct();
-
-    if (!$this->get_template_id($product))
-      return false;
-
-    if (!$details = $this->getTemplateDetailsForCurrentProduct())
-      return false;
-
-    $details['pages_number'] = count($details['pages']);
-
-    $name = $product->getName();
+    $product_name = $context->getProduct()->getName();
 
     $previews = array();
 
-    foreach ($details['pages'] as $page) {
-      $guid = explode('preview/', $page['preview-image']);
+    foreach ($template_details['pages'] as $page_number => &$page_details) {
+      $preview_guid = explode('preview/', $page_details['preview-image']);
+      $thumb_guid = explode('thumb/', $page_details['thumb-image']);
 
-      echo '<img src="', $this->get_preview_url($guid[1]), '" alt="Printable ',
-           $name, '" class="zp-hidden" />';
-    }
+      $preview_url = $this->get_preview_url($preview_guid[1]);
 
-    $request = $this->_getRequest();
+      $page_details['preview-image'] = $preview_url;
+      $page_details['thumb-image']
+                           = $this->get_thumbnail_url($thumb_guid[1], 100, 100);
 
-    //Check if the product page is requested with 'for-item' parameter
-    $hasForItem = $request->has('for-item');
+      if (isset($page_details['updated-preview-image'])) {
+        $updated_preview_guid
+                  = explode('preview/', $page_details['updated-preview-image']);
+        $page_details['updated-preview-image']
+                             = $this->get_preview_url($updated_preview_guid[1]);
 
-    //Check if the product page is requested
-    //with 'update-first-preview' parameter
-    $hasUpdateFirstPreview = $request->getParam('update-first-preview') == '1';
-
-    //Check if the product page is requested with 'reorder' parameter
-    $hasReorder = strlen($request->getParam('reorder')) == 36;
-
-    $lastUrl = Mage::getSingleton('core/session')->getData('last_url');
-
-    //Check if the product page is opened from the shopping cart
-    //to update first preview image for cross-sell products)
-    $isFromShoppingCart = strpos($lastUrl, 'checkout/cart') !== false;
-
-    $updateFirstPreview = $hasForItem
-                          || $hasReorder
-                          || $hasUpdateFirstPreview
-                          || $isFromShoppingCart
-                          || $product->getConfigureMode();
-
-    $preserveFields = $product->getConfigureMode()
-                      || $hasReorder
-                      || $hasUpdateFirstPreview
-                      || $hasForItem;
-
-    $preserveFields = !$preserveFields;
-
-    $hasShapes = false;
-
-    foreach ($details['pages'] as $page)
-      if (isset($page['shapes'])) {
-        $hasShapes = true;
-
-        break;
+        $previews[] = $updated_preview_guid[1];
       }
 
-    $data = json_encode(array(
-      'template_details' => $details,
-      'is_personalization_step'
-        => Mage::registry('webtoprint_is_personalisation_step'),
-      'update_first_preview_on_load' => $updateFirstPreview,
-      'preserve_fields' => $preserveFields,
-      'has_shapes' => $hasShapes,
+      echo sprintf('<img src="%s" alt="Printable %s" class="zp-hidden" />',
+                   $preview_url,
+                   $product_name );
+    }
+
+    $previews_from_session = $session->hasData('zetaprints-previews');
+
+    if ($previews_from_session) {
+      $user_input = unserialize($session->getData('zetaprints-user-input'));
+
+      $session->unsetData('zetaprints-previews');
+    }
+
+    //Check that the product page was opened from cart page (need for automatic
+    //first preview update for cross-sell product) or was
+    //requested with for-item parameter.
+    $update_first_preview_on_load = $this->_getRequest()->has('for-item')
+      || (strpos($session->getData('last_url'), 'checkout/cart') !== false
+          && !$context->getProduct()->getConfigureMode())
+      || (isset($_GET['update-first-preview'])
+          && $_GET['update-first-preview'] == '1');
+
+    $has_shapes = false;
+
+    foreach ($template_details['pages'] as $page)
+      if (isset($page['shapes']))
+        $has_shapes = true;
+
+    $zp_data = json_encode(array(
+      'template_details' => $template_details,
+      'previews' => $previews,
+      'previews_from_session' => $previews_from_session,
+      'is_personalization_step' => $this->is_personalization_step($context),
+      'update_first_preview_on_load' => $update_first_preview_on_load,
+      'has_shapes' => $has_shapes,
       'w2p_url' => Mage::getStoreConfig('webtoprint/settings/url'),
       'options' => $this->getCustomOptions(),
       'url' => array(
         'preview' => $this->_getUrl('web-to-print/preview'),
         'preview_download' => $this->_getUrl('web-to-print/preview/download'),
         'upload' => $this->_getUrl('web-to-print/upload'),
-        'upload_by_url' => $this->_getUrl('web-to-print/upload/byurl'),
         'image' => $this->_getUrl('web-to-print/image/update'),
         'user-image-template'
-          => $this->get_photo_thumbnail_url('image-guid.image-ext'),
-        'edit-image-template' => $this->get_image_editor_url('')
-      )
-    ));
+                 => $this->get_photo_thumbnail_url('image-guid.image-ext'),
+        'edit-image-template' => $this->get_image_editor_url('')  ) ));
 ?>
 <script type="text/javascript">
 //<![CDATA[
@@ -1158,7 +934,13 @@ var userImageThumbSelected = null;  //user selected image to edit
 // Global vars end
 
 jQuery(document).ready(function($) {
-  zp = <?php echo $data ?>;
+  <?php
+  if (isset($user_input) && is_array($user_input))
+    foreach ($user_input as $key => $value)
+      echo "$('[name=$key]').val('$value');\n";
+  ?>
+
+  zp = <?php echo $zp_data ?>;
 
   edit_button_text = "<?php echo $this->__('Edit');?>";
   delete_button_text = "<?php echo $this->__('Delete'); ?>";
@@ -1168,15 +950,12 @@ jQuery(document).ready(function($) {
   use_image_button_text = "<?php echo $this->__('Use image'); ?>";
   selected_image_button_text = "<?php echo $this->__('Selected image'); ?>";
 
-  updating_preview_image_text = "<?php echo $this->__('Updating preview image'); ?>"
-  cannot_update_preview = "<?php echo $this->__('Cannot update the preview. Try again.'); ?>";
-  cannot_update_preview_second_time = "<?php echo $this->__('Cannot update the preview. Try again or add to cart as is and we will update it manually.'); ?>";
+  preview_generation_response_error_text = "<?php echo $this->__('Can\'t get preview image:'); ?>";
+  preview_generation_error_text = "<?php echo $this->__('There was an error in generating or receiving preview image.\nPlease try again.'); ?>";
   preview_sharing_link_error_text = "<?php echo $this->__('Error was occurred while preparing preview image'); ?>";
   uploading_image_error_text = "<?php echo $this->__('Error was occurred while uploading image'); ?>";
   notice_to_update_preview_text = "<?php echo $this->__('Update preview first!'); ?>";
   notice_to_update_preview_text_for_multipage_template = "<?php echo $this->__('Update all previews first!'); ?>";
-  warning_user_data_changed = "<?php echo $this->__('Press Update Preview before adding to cart to include your latest changes'); ?>";
-  notice_update_preview_after_data_changed = "<?php echo $this->__('Do you want to update the preview with your latest changes?'); ?>";
 
   click_to_close_text = "<?php echo $this->__('Click to close'); ?>";
   click_to_view_in_large_size = "<?php echo $this->__('Click to view in large size');?>";

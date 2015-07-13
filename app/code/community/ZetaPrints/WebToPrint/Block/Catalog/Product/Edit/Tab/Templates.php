@@ -9,20 +9,7 @@ class ZetaPrints_WebToPrint_Block_Catalog_Product_Edit_Tab_Templates extends Mag
   }
 
   protected function _prepareCollection () {
-    $this->setCollection(
-
-      //Load only required data
-      Mage::getResourceModel('webtoprint/template_collection')
-
-        //Use guid column as template_id column, so radiogroup renderer will
-        //use template GUID instead of table row ID as value for radio element
-        //@see Mage_Adminhtml_Block_Widget_Grid_Column_Renderer_Radio::render()
-        ->addFieldToSelect('guid', 'template_id')
-
-        ->addFieldToSelect('title')
-        ->addFieldToSelect('date')
-    );
-
+    $this->setCollection(Mage::getModel('webtoprint/template')->getCollection());
     return parent::_prepareCollection();
   }
 
@@ -33,11 +20,7 @@ class ZetaPrints_WebToPrint_Block_Catalog_Product_Edit_Tab_Templates extends Mag
       'html_name'      => 'product[webtoprint_template]',
       'values'    => array($this->get_template_guid ()),
       'align'     => 'center',
-
-      //template_id column is replaced by guid column in the collection so
-      //it contains temaplate GUIDs
-      'index'     => 'template_id',
-
+      'index'     => 'guid',
       'sortable'  => false,
     ));
 

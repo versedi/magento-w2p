@@ -47,7 +47,7 @@ class ZetaPrints_WebToPrint_Model_Convert_Parser_Catalogue
 
     $line = 0;
 
-    $helper = Mage::helper('webtoprint/category');
+    $helper = Mage::helper('webtoprint');
 
     foreach ($catalogs as $catalog) {
       $total_number_of_catalogs++;
@@ -62,7 +62,7 @@ class ZetaPrints_WebToPrint_Model_Convert_Parser_Catalogue
 
       $category = $helper->getCategory($catalog['title'], true);
 
-      if (!($category && $category->getId())) {
+      if (!$category && !$category->getId()) {
         $this->notice("Can't create catalogue '{$catalog['title']}'");
 
         $number_of_not_created_catalogues++;

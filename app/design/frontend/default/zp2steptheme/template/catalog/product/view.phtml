@@ -20,7 +20,7 @@
  *
  * @category    design
  * @package     base_default
- * @copyright   Copyright (c) 2014 Magento Inc. (http://www.magentocommerce.com)
+ * @copyright   Copyright (c) 2011 Magento inc. (http://www.magentocommerce.com)
  * @license     http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
  */
 
@@ -48,16 +48,19 @@
                        : $this->getAddToCartUrl($_product);
     ?>
 
-    <form action="<?php echo $actionUrl; ?>" method="post" id="product_addtocart_form"<?php if($_product->getOptions()): ?> enctype="multipart/form-data"<?php endif; ?>>
+    <!-- /****** ZP-CODE:1 Checking for current step and outputting link for a next step ******/ -->
 
-        <!-- /****** ZP-CODE:1 Check if this step is not personalisation
-                     then show standard M. product page... ******/ -->
+    <form action="<?php if (!$this->helper('webtoprint/personalization-form')->get_next_step_url($this)) echo $actionUrl; ?>" method="post" id="product_addtocart_form"<?php if($_product->getOptions()): ?> enctype="multipart/form-data"<?php endif; ?>>
 
-        <?php if(!$this->helper('webtoprint/2step')->isPersonalisationStep()): ?>
+    <!-- /****** ZP-CODE:1 End ******/ -->
 
-        <!-- /****** ZP-CODE:1 End ******/ -->
+        <!-- /****** ZP-CODE:2 Check if this step is not personalization
+                     then show standard magento product page... ******/ -->
 
-        <?php echo $this->getBlockHtml('formkey') ?>
+        <?php if(!$this->helper('webtoprint/personalization-form')->is_personalization_step($this)): ?>
+
+        <!-- /****** ZP-CODE:2 End ******/ -->
+
         <div class="no-display">
             <input type="hidden" name="product" value="<?php echo $_product->getId() ?>" />
             <input type="hidden" name="related_product" id="related-products-field" value="" />
@@ -118,29 +121,27 @@
             <?php echo $this->getChildChildHtml('container2', '', true, true) ?>
         <?php endif;?>
 
-        <!-- /****** ZP-CODE:2 ... otherwise show web-to-print personalisation form ******/ -->
+        <!-- /****** ZP-CODE:3 ... otherwise show web-to-print personalization form ******/ -->
 
         <?php else: ?>
 
-        <!-- /****** ZP-CODE:2 End ******/ -->
+        <!-- /****** ZP-CODE:3 End ******/ -->
 
-        <!-- /****** ZP-CODE:3 Output image tabs for multipage products
-                               with web-to-print feature ******/ -->
+        <!-- /****** ZP-CODE:4 Printing image tabs for multipage products with web-to-print feature ******/ -->
 
         <?php $this->helper('webtoprint/personalization-form')->get_page_tabs($this); ?>
 
-        <!-- /****** ZP-CODE:3 End ******/ -->
+        <!-- /****** ZP-CODE:4 End ******/ -->
 
         <div class="no-display">
             <input type="hidden" name="product" value="<?php echo $_product->getId() ?>" />
             <input type="hidden" name="related_product" id="related-products-field" value="" />
 
-            <!-- /****** ZP-CODE:4 Output list of <input> tags for params
-                                   from step 1 (options)  ******/ -->
+            <!-- /****** ZP-CODE:5 Printing list <input> tags for params from step 1 (options)  ******/ -->
 
             <?php echo $this->helper('webtoprint/personalization-form')->get_params_from_previous_step($this); ?>
 
-            <!-- /****** ZP-CODE:4 End ******/ -->
+            <!-- /****** ZP-CODE:5 End ******/ -->
 
         </div>
 
@@ -153,50 +154,37 @@
                 <?php echo $this->getChildHtml('addtocart') ?>
             </div>
 
-            <!-- /****** ZP-CODE:5 Output button for showing data sets ******/ -->
-
-            <?php $this->helper('webtoprint/personalization-form')->getDataSetTable($this); ?>
-
-            <!-- /****** ZP-CODE:5 End ******/ -->
-
-            <!-- /****** ZP-CODE:6 Output input fields, images, stock images,
-                                   colour pickers and palettes for products
-                                   with web-to-print feature ******/ -->
+            <!-- /****** ZP-CODE:6 Printing input fields, stock images choosers and color pickers for products
+                         with web-to-print feature ******/ -->
 
             <?php $this->helper('webtoprint/personalization-form')->get_text_fields($this); ?>
             <?php $this->helper('webtoprint/personalization-form')->get_image_fields($this); ?>
-            <?php echo $this->getChildHtml('webtoprint_palettes'); ?>
 
             <!-- /****** ZP-CODE:6 End ******/ -->
 
         </div>
 
-        <!-- /****** ZP-CHANGE:1 Add ID attribute to the element.
-                                 Required by web-to-print JS code ******/ -->
-
         <div id="zetaprints-preview-image-container" class="product-img-box">
-
-        <!-- /****** ZP-CHANGE:1 End ******/ -->
-
             <?php echo $this->getChildHtml('media') ?>
         </div>
 
-        <!-- /****** ZP-CODE:7 Output web-to-print buttons for products
-                               with web-to-print feature ******/ -->
+        <!-- /****** ZP-CODE:7 Printing preview and next page buttond
+                     for products with web-to-print feature ******/ -->
 
-        <?php echo $this->getChildHtml('webtoprint_buttons'); ?>
+        <?php $this->helper('webtoprint/personalization-form')->get_preview_button($this); ?>
+        <?php $this->helper('webtoprint/personalization-form')->get_next_page_button($this); ?>
 
         <!-- /****** ZP-CODE:7 End ******/ -->
 
         <div class="clearer"></div>
 
-        <!-- /****** ZP-CODE:8 Output JavaScript for personalisation form ******/ -->
+        <!-- /****** ZP-CODE:8 Printing JavaScript for magento personalization form ******/ -->
 
         <?php $this->helper('webtoprint/personalization-form')->get_js($this); ?>
 
         <!-- /****** ZP-CODE:8 End ******/ -->
 
-        <!-- /****** ZP-CODE:9 Close 'if' opened in ZP-CODE:2 ******/ -->
+        <!-- /****** ZP-CODE:9 Close 'if' opened in  ZP-CODE:2 ******/ -->
 
         <?php endif; ?>
 
@@ -236,13 +224,6 @@
                 delete Validation.methods['required-entry'];
                 delete Validation.methods['validate-one-required'];
                 delete Validation.methods['validate-one-required-by-name'];
-                // Remove custom datetime validators
-                for (var methodName in Validation.methods) {
-                    if (methodName.match(/^validate-datetime-.*/i)) {
-                        delete Validation.methods[methodName];
-                    }
-                }
-
                 if (this.validator.validate()) {
                     if (url) {
                         this.form.action = url;

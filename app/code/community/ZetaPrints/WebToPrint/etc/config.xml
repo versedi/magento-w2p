@@ -2,7 +2,7 @@
 <config>
   <modules>
     <ZetaPrints_WebToPrint>
-      <version>15</version>
+      <version>12</version>
     </ZetaPrints_WebToPrint>
   </modules>
 
@@ -10,7 +10,7 @@
     <models>
       <webtoprint>
         <class>ZetaPrints_WebToPrint_Model</class>
-        <resourceModel>webtoprint_resource</resourceModel>
+        <resourceModel>webtoprint_mysql4</resourceModel>
 
         <rewrite>
           <templates-synchronization>ZetaPrints_WebToPrint_Model_Convert_Parser_Template</templates-synchronization>
@@ -20,27 +20,27 @@
         </rewrite>
       </webtoprint>
 
-      <webtoprint_resource>
-        <class>ZetaPrints_WebToPrint_Model_Resource</class>
+      <webtoprint_mysql4>
+        <class>ZetaPrints_WebToPrint_Model_Mysql4</class>
 
         <entities>
           <template>
             <table>zetaprints_templates</table>
           </template>
         </entities>
-      </webtoprint_resource>
+      </webtoprint_mysql4>
+
+      <dataflow>
+        <rewrite>
+          <profile_history>ZetaPrints_WebToPrint_Model_Profile_History</profile_history>
+        </rewrite>
+      </dataflow>
 
       <sales>
         <rewrite>
           <quote_item>ZetaPrints_WebToPrint_Model_Quote_Item</quote_item>
         </rewrite>
       </sales>
-
-      <wishlist>
-        <rewrite>
-          <item>ZetaPrints_WebToPrint_Model_Item</item>
-        </rewrite>
-      </wishlist>
     </models>
 
     <blocks>
@@ -48,18 +48,17 @@
         <class>ZetaPrints_WebToPrint_Block</class>
       </webtoprint>
 
+      <adminhtml>
+        <rewrite>
+          <catalog_product_edit_tabs>ZetaPrints_WebToPrint_Block_Catalog_Product_Edit_Tabs</catalog_product_edit_tabs>
+        </rewrite>
+      </adminhtml>
+
       <page>
         <rewrite>
           <html_footer>ZetaPrints_WebToPrint_Block_Html_Footer</html_footer>
         </rewrite>
       </page>
-
-      <wishlist>
-        <rewrite>
-          <customer_sidebar>ZetaPrints_WebToPrint_Block_Customer_Sidebar</customer_sidebar>
-          <customer_wishlist_item_column_comment>ZetaPrints_WebToPrint_Block_Customer_Wishlist_Item_Column_Comment</customer_wishlist_item_column_comment>
-        </rewrite>
-      </wishlist>
     </blocks>
 
     <helpers>
@@ -76,9 +75,24 @@
       <webtoprint_setup>
         <setup>
           <module>ZetaPrints_WebToPrint</module>
-          <class>ZetaPrints_WebToPrint_Model_Resource_Setup</class>
+          <class>ZetaPrints_WebToPrint_Model_Resource_Mysql4_Setup</class>
         </setup>
+        <connection>
+          <use>core_setup</use>
+        </connection>
       </webtoprint_setup>
+
+      <webtoprint_write>
+        <connection>
+          <use>core_write</use>
+        </connection>
+      </webtoprint_write>
+
+      <webtoprint_read>
+        <connection>
+          <use>core_read</use>
+        </connection>
+      </webtoprint_read>
     </resources>
 
     <events>
@@ -140,12 +154,6 @@
 
       <sales_order_save_after>
         <observers>
-          <webtoprint-complete-order-on-payment>
-            <type>singleton</type>
-            <class>ZetaPrints_WebToPrint_Model_Events_Observer</class>
-            <method>complete_zetaprints_order_on_payment</method>
-          </webtoprint-complete-order-on-payment>
-
           <webtoprint-order-complete>
             <type>singleton</type>
             <class>ZetaPrints_WebToPrint_Model_Events_Observer</class>
@@ -174,8 +182,7 @@
         </observers>
       </customer_save_before>
 
-      <sales_model_service_quote_submit_success>
-      <!--<checkout_type_onepage_save_order_after>-->
+      <checkout_type_onepage_save_order_after>
       <!--checkout_onepage_controller_success_action-->
         <observers>
           <webtoprint-complete-zetaprints-order>
@@ -185,8 +192,7 @@
           </webtoprint-complete-zetaprints-order>
         </observers>
       <!--/checkout_onepage_controller_success_action-->
-      <!--</checkout_type_onepage_save_order_after>-->
-      </sales_model_service_quote_submit_success>
+      </checkout_type_onepage_save_order_after>
 
       <catalog_controller_product_init_before>
         <observers>
@@ -257,30 +263,24 @@
         <webtoprint>
           <file>web-to-print.xml</file>
         </webtoprint>
+
+        <catalog-web-to-print-product>
+          <file>catalog/web-to-print-product.xml</file>
+        </catalog-web-to-print-product>
+
+        <review-web-to-print-product>
+          <file>review/web-to-print-product.xml</file>
+        </review-web-to-print-product>
+
+        <checkout-web-to-print-cart>
+          <file>checkout/web-to-print-cart.xml</file>
+        </checkout-web-to-print-cart>
+
+        <sales-web-to-print-order>
+          <file>sales/web-to-print-order.xml</file>
+        </sales-web-to-print-order>
       </updates>
     </layout>
-
-    <events>
-      <catalog_controller_product_view>
-        <observers>
-          <webtoprint_register_form_step>
-            <type>singleton</type>
-            <class>ZetaPrints_WebToPrint_Model_Events_Observer</class>
-            <method>registerFormStep</method>
-          </webtoprint_register_form_step>
-        </observers>
-      </catalog_controller_product_view>
-
-      <core_block_abstract_to_html_before>
-        <observers>
-          <webtoprint_set_url_for_next_step>
-            <type>singleton</type>
-            <class>ZetaPrints_WebToPrint_Model_Events_Observer</class>
-            <method>setUrlForNextStep</method>
-          </webtoprint_set_url_for_next_step>
-        </observers>
-      </core_block_abstract_to_html_before>
-    </events>
   </frontend>
 
   <admin>
@@ -315,18 +315,6 @@
         </admin>
       </resources>
     </acl>
-
-    <events>
-      <core_block_abstract_prepare_layout_after>
-        <observers>
-          <webtoprint-add-tab>
-            <type>singleton</type>
-            <class>ZetaPrints_WebToPrint_Model_Events_Observer</class>
-            <method>addWebToPrintTab</method>
-          </webtoprint-add-tab>
-        </observers>
-      </core_block_abstract_prepare_layout_after>
-    </events>
   </adminhtml>
 
   <stores>
@@ -345,18 +333,9 @@
   <default>
     <webtoprint>
       <settings>
-        <url>http://apidemo.zetaprints.com/</url>
-        <key>fcb42944-5b11-42d2-8c3f-5b9d96a794b9</key>
         <templates-removing-behaviour>-1</templates-removing-behaviour>
         <products-populate-defaults>1</products-populate-defaults>
-        <ignore-unpaid-orders>0</ignore-unpaid-orders>
       </settings>
-      <compat>
-
-        <!-- 1 = Yes -->
-        <jquery>1</jquery>
-        <old_theme>no</old_theme>
-      </compat>
     </webtoprint>
   </default>
 </config>

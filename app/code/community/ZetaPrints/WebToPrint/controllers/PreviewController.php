@@ -96,16 +96,14 @@ class ZetaPrints_WebToPrint_PreviewController
     $helper = Mage::helper('webtoprint');
 
     //Generate URLs for preview and thumbnail images
-    foreach ($templates_details['pages'] as &$page) {
-      if (isset($page['updated-preview-image']))
+    foreach ($templates_details['pages'] as &$page)
+      if (isset($page['updated-preview-image'])) {
         $page['updated-preview-url'] = $helper
                   ->get_preview_url(substr($page['updated-preview-image'], 8));
-
-      if (isset($page['updated-thumb-image']))
         $page['updated-thumb-url'] = $helper
-                  ->get_thumbnail_url(substr($page['updated-thumb-image'], 6),
+                  ->get_thumbnail_url(substr($page['updated-preview-image'], 8),
                                       100, 100);
-    }
+      }
 
     echo json_encode($templates_details);
   }
@@ -152,41 +150,36 @@ class ZetaPrints_WebToPrint_PreviewController
   }
 
   public function downloadAction () {
-    $request = $this->getRequest();
-
-    if (!$request->has('guid'))
+    if (!$this->getRequest()->has('guid'))
         return;
 
-    $guid = $request->get('guid');
+    $guid = $this->getRequest()->get('guid');
 
-    $mediaConfig = Mage::getModel('catalog/product_media_config');
+    $media_config = Mage::getModel('catalog/product_media_config');
 
-    $path = str_replace('preview/', 'previews/', $guid);
-    $path = $mediaConfig->getTmpMediaPath($path);
+    $file_path = $media_config->getTmpMediaPath("previews/{$guid}");
 
     //Check that preview was already downloaded
     //to prevent subsequent downloads
-    if (file_exists($path)) {
+    if (file_exists($file_path)) {
       echo json_encode('OK');
       return;
     }
 
-    $url = Mage::getStoreConfig('webtoprint/settings/url')
+    $url = Mage::getStoreConfig('webtoprint/settings/url') . '/preview/'
            . $guid;
 
     //Download preview image from ZetaPrinrs
     $response = zetaprints_get_content_from_url($url);
 
-    $errorMsg = 'Error was occurred while preparing preview image';
-
     if (zetaprints_has_error($response)) {
-      echo json_encode($this->__($errorMsg));
+      echo json_encode($this->__('Error was occurred while preparing preview image'));
       return;
     }
 
     //Save preview image on M. server
-    if (file_put_contents($path, $response['content']['body']) === false) {
-      echo json_encode($this->__($errorMsg));
+    if (file_put_contents($file_path, $response['content']['body']) === false) {
+      echo json_encode($this->__('Error was occurred while preparing preview image'));
       return;
     }
 

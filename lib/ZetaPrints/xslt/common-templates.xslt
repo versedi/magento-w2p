@@ -18,17 +18,12 @@
         </dt>
         <dd>
           <xsl:choose>
-            <xsl:when test="count(Value)=2 and string-length(Value[last()])=0">
+            <xsl:when test="count(Value)=2 and string-length(Value[last()])=0 and not(DataSet)">
               <input type="hidden" name="zetaprints-_{@FieldName}" value="&#x2E0F;" class="zetaprints-field" />
               <input id="page-{$page}-field-{position()}" type="checkbox" name="zetaprints-_{@FieldName}" value="{Value[1]}" class="zetaprints-field">
                 <xsl:if test="@Value=Value[1]">
                   <xsl:attribute name="checked">checked</xsl:attribute>
                 </xsl:if>
-
-                <xsl:if test="../../@DatasetIntegrityEnforce=1">
-                  <xsl:attribute name="readonly">readonly</xsl:attribute>
-                </xsl:if>
-
                 <xsl:attribute name="title">
                   <xsl:call-template name="trans">
                     <xsl:with-param name="key">
@@ -39,7 +34,7 @@
               </input>
             </xsl:when>
 
-            <xsl:when test="count(Value)=0">
+            <xsl:when test="count(Value)=0 and not(DataSet)">
               <xsl:choose>
                 <xsl:when test="@Multiline">
                   <div class="zetaprints-text-field-wrapper">
@@ -52,10 +47,6 @@
                           </xsl:with-param>
                         </xsl:call-template>
                       </xsl:attribute>
-                    </xsl:if>
-
-                    <xsl:if test="../../@DatasetIntegrityEnforce=1">
-                      <xsl:attribute name="readonly">readonly</xsl:attribute>
                     </xsl:if>
 
                     <xsl:choose>
@@ -93,10 +84,6 @@
                       </xsl:attribute>
                     </xsl:if>
 
-                    <xsl:if test="../../@DatasetIntegrityEnforce=1">
-                      <xsl:attribute name="readonly">readonly</xsl:attribute>
-                    </xsl:if>
-
                     <xsl:choose>
                       <xsl:when test="@Value and string-length(@Value)!=0">
                         <xsl:attribute name="value">
@@ -129,25 +116,41 @@
                   </xsl:call-template>
                 </xsl:attribute>
 
-                <xsl:if test="../../@DatasetIntegrityEnforce=1">
-                  <xsl:attribute name="readonly">readonly</xsl:attribute>
-                </xsl:if>
+                <xsl:choose>
 
-                <xsl:for-each select="Value">
-                  <!--<xsl:if test=".!=''">-->
-                    <option>
-                      <xsl:if test=".=../@Value">
-                        <xsl:attribute name="selected">selected</xsl:attribute>
+                  <xsl:when test="DataSet">
+                    <xsl:for-each select="DataSet/Cell">
+                      <option>
+                        <xsl:if test="@text = ../../@Value">
+                          <xsl:attribute name="selected">selected</xsl:attribute>
+                        </xsl:if>
+                        <xsl:call-template name="trans">
+                          <xsl:with-param name="key">
+                            <xsl:value-of select="@text" />
+                          </xsl:with-param>
+                        </xsl:call-template>
+                      </option>
+                    </xsl:for-each>
+                  </xsl:when>
+
+                  <xsl:otherwise>
+                    <xsl:for-each select="Value">
+                      <xsl:if test=".!=''">
+                        <option>
+                          <xsl:if test=".=../@Value">
+                            <xsl:attribute name="selected">selected</xsl:attribute>
+                          </xsl:if>
+                          <xsl:call-template name="trans">
+                            <xsl:with-param name="key">
+                              <xsl:value-of select="." />
+                            </xsl:with-param>
+                          </xsl:call-template>
+                        </option>
                       </xsl:if>
-                      <xsl:call-template name="trans">
-                        <xsl:with-param name="key">
-                          <xsl:value-of select="." />
-                        </xsl:with-param>
-                      </xsl:call-template>
-                    </option>
-                  <!--</xsl:if>-->
-                </xsl:for-each>
+                    </xsl:for-each>
+                  </xsl:otherwise>
 
+                </xsl:choose>
               </select>
             </xsl:otherwise>
           </xsl:choose>
@@ -160,40 +163,36 @@
     <xsl:param name="page" />
 
     <xsl:for-each select="//Images/Image[@Page=$page]">
-      <div class="zetaprints-images-selector no-value minimized" title="{@Name}">
+      <div class="zetaprints-images-selector no-value minimized block" title="{@Name}">
         <xsl:if test="$show-image-field">
-          <xsl:attribute name="class">zetaprints-images-selector no-value</xsl:attribute>
+          <xsl:attribute name="class">zetaprints-images-selector no-value block</xsl:attribute>
         </xsl:if>
 
-        <div class="head">
-          <div class="icon">
-            <span>
-              <xsl:call-template name="trans">
-                <xsl:with-param name="key">Title</xsl:with-param>
-              </xsl:call-template>:
-            </span>
-          </div>
-          <label class="title">
+        <div class="head block-title">
+          <a class="image up-down" href="#"><span>
             <xsl:call-template name="trans">
-              <xsl:with-param name="key">
-                <xsl:value-of select="@Name" />
-              </xsl:with-param>
+              <xsl:with-param name="key">Up/Down</xsl:with-param>
             </xsl:call-template>
-          </label>
-          <a class="image up-down" href="#">
-            <span>
+          </span></a>
+          <a class="image collapse-expand" href="#"><span>
+            <xsl:call-template name="trans">
+              <xsl:with-param name="key">Collapse/Expand</xsl:with-param>
+            </xsl:call-template>
+          </span></a>
+          <div class="icon"><span>
+            <xsl:call-template name="trans">
+              <xsl:with-param name="key">Title</xsl:with-param>
+            </xsl:call-template>:
+          </span></div>
+          <div class="title">
+            <label>
               <xsl:call-template name="trans">
-                <xsl:with-param name="key">Up/Down</xsl:with-param>
+                <xsl:with-param name="key">
+                  <xsl:value-of select="@Name" />
+                </xsl:with-param>
               </xsl:call-template>
-            </span>
-          </a>
-          <a class="image collapse-expand" href="#">
-            <span>
-              <xsl:call-template name="trans">
-                <xsl:with-param name="key">Collapse/Expand</xsl:with-param>
-              </xsl:call-template>
-            </span>
-          </a>
+            </label>
+          </div>
         </div>
         <div id="page-{$page}-tabs-{position()}" class="selector-content">
           <ul class="tab-buttons">
@@ -320,17 +319,52 @@
             </div>
             <div id="page-{$page}-tabs-{position()}-2" class="tab user-images images-scroller">
               <input type="hidden" name="parameter" value="{@Name}" />
-              <table>
-                <tr>
-                  <xsl:call-template name="user-image-template">
-                    <xsl:with-param name="stub">1</xsl:with-param>
-                  </xsl:call-template>
+              <table><tr>
+                <xsl:for-each select="user-image">
+                  <td>
+                    <input type="radio" name="zetaprints-#{../@Name}" value="{@guid}" class="zetaprints-images zetaprints-field">
+                      <xsl:if test="@guid=../@Value">
+                        <xsl:attribute name="checked">checked</xsl:attribute>
+                      </xsl:if>
+                    </input>
+                    <div class="image-edit-thumb">
+                      <xsl:attribute name="title">
+                        <xsl:call-template name="trans">
+                          <xsl:with-param name="key">Click to edit</xsl:with-param>
+                        </xsl:call-template>
+                      </xsl:attribute>
 
-                  <xsl:for-each select="user-image">
-                    <xsl:call-template name="user-image-template" />
-                  </xsl:for-each>
-                </tr>
-              </table>
+                      <img src="{@thumbnail}" alt="{@guid}" />
+
+                      <div class="buttons-row">
+                        <div class="zp-button zp-delete-button">
+                          <xsl:attribute name="title">
+                            <xsl:call-template name="trans">
+                              <xsl:with-param name="key">Click to delete</xsl:with-param>
+                            </xsl:call-template>
+                          </xsl:attribute>
+
+                          <xsl:call-template name="trans">
+                            <xsl:with-param name="key">Delete</xsl:with-param>
+                          </xsl:call-template>
+                        </div>
+
+                        <div class="zp-button zp-edit-button">
+                          <xsl:attribute name="title">
+                            <xsl:call-template name="trans">
+                              <xsl:with-param name="key">Click to edit</xsl:with-param>
+                            </xsl:call-template>
+                          </xsl:attribute>
+
+                          <xsl:call-template name="trans">
+                            <xsl:with-param name="key">Edit</xsl:with-param>
+                          </xsl:call-template>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </xsl:for-each>
+              </tr></table>
             </div>
           </xsl:if>
           <xsl:if test="StockImage">
@@ -434,16 +468,16 @@
                 <xsl:with-param name="key">Click to show page</xsl:with-param>
               </xsl:call-template>
             </xsl:attribute>
-            <img rel="page-{position()}">
+            <img rel="page-{position()}" src="{@ThumbImageUpdated}">
               <xsl:choose>
-                <xsl:when test="@ThumbUrlUpdated">
+                <xsl:when test="@ThumbImageUpdated">
                   <xsl:attribute name="src">
-                    <xsl:value-of select="@ThumbUrlUpdated" />
+                    <xsl:value-of select="@ThumbImageUpdated" />
                   </xsl:attribute>
                 </xsl:when>
                 <xsl:otherwise>
                   <xsl:attribute name="src">
-                    <xsl:value-of select="@ThumbUrl" />
+                    <xsl:value-of select="@ThumbImage" />
                   </xsl:attribute>
                 </xsl:otherwise>
               </xsl:choose>
@@ -455,6 +489,7 @@
                 </xsl:call-template>
               </xsl:attribute>
             </img>
+            <br />
             <span>
               <xsl:call-template name="trans">
                 <xsl:with-param name="key">
@@ -535,68 +570,6 @@
         </xsl:for-each>
       </tbody>
     </table>
-  </xsl:template>
-
-  <xsl:template name="user-image-template">
-    <xsl:param name="stub" />
-
-    <xsl:variable name="name">
-      <xsl:choose>
-        <xsl:when test="$stub">
-          <xsl:value-of select="@Name"/>
-        </xsl:when>
-        <xsl:otherwise>
-          <xsl:value-of select="../@Name"/>
-        </xsl:otherwise>
-      </xsl:choose>
-    </xsl:variable>
-
-    <td>
-      <xsl:if test="$stub">
-        <xsl:attribute name="class">zp-html-template</xsl:attribute>
-      </xsl:if>
-
-      <input type="radio" name="zetaprints-#{$name}" value="{@guid}" class="zetaprints-images zetaprints-field">
-        <xsl:if test="@guid=../@Value">
-          <xsl:attribute name="checked">checked</xsl:attribute>
-        </xsl:if>
-      </input>
-      <div class="image-edit-thumb">
-        <xsl:attribute name="title">
-          <xsl:call-template name="trans">
-            <xsl:with-param name="key">Click to edit</xsl:with-param>
-          </xsl:call-template>
-        </xsl:attribute>
-
-        <img src="{@thumbnail}" alt="{@guid}" />
-
-        <div class="buttons-row">
-          <div class="zp-button zp-delete-button">
-            <xsl:attribute name="title">
-              <xsl:call-template name="trans">
-                <xsl:with-param name="key">Click to delete</xsl:with-param>
-              </xsl:call-template>
-            </xsl:attribute>
-
-            <xsl:call-template name="trans">
-              <xsl:with-param name="key">Delete</xsl:with-param>
-            </xsl:call-template>
-          </div>
-
-          <div class="zp-button zp-edit-button">
-            <xsl:attribute name="title">
-              <xsl:call-template name="trans">
-                <xsl:with-param name="key">Click to edit</xsl:with-param>
-              </xsl:call-template>
-            </xsl:attribute>
-
-            <xsl:call-template name="trans">
-              <xsl:with-param name="key">Edit</xsl:with-param>
-            </xsl:call-template>
-          </div>
-        </div>
-      </div>
-    </td>
   </xsl:template>
 
   <!--The translation template-->
