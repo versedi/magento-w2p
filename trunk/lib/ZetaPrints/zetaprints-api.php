@@ -933,8 +933,8 @@ function zetaprints_get_content_from_url ($url, $post = null) {
     if ($error) {
       _zetaprints_debug(compact('error', 'info', 'headers', 'body'));
 
-      if (isset($error['update_request']))
-        extract($error['update_request']);
+      if (isset($error['update_request']['post']))
+        $post = array_merge($post, $error['update_request']['post']);
     }
   } while ($error && _zp_repeat($error));
 
